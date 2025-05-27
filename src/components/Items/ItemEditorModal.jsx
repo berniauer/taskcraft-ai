@@ -22,6 +22,9 @@ const ItemEditorModal = ({ isOpen, onClose, item, onSave }) => {
     if (item) {
       setEditedTitle(item.title || '');
       setEditedDescription(item.description || '');
+    } else { // Wenn kein Item da ist (z.B. Modal wird geschlossen), States zurücksetzen
+      setEditedTitle('');
+      setEditedDescription('');
     }
   }, [item]);
 
@@ -30,14 +33,26 @@ const ItemEditorModal = ({ isOpen, onClose, item, onSave }) => {
   const visual = itemTypeVisuals[item.item_type?.toLowerCase()] || itemTypeVisuals.default;
   const ItemTypeIcon = visual.icon;
 
-  const handleSave = () => {
-    console.log('Speichern geklickt für Item:', item.id, { title: editedTitle, description: editedDescription });
-    onSave({ ...item, title: editedTitle, description: editedDescription });
-    onClose();
+const handleSaveChanges = () => { // Umbenannt von handleSave zu handleSaveChanges zur Klarheit
+    console.log('[ItemEditorModal] Speichern geklickt. Daten:', { title: editedTitle, description: editedDescription });
+    onSave({ 
+      // Wichtig: Übergebe nur die Felder, die tatsächlich geändert wurden
+      // und die ID des Items, um es in der DB zu finden.
+      // Die komplette Item-Struktur (wie ...item) sollte von der Speicherlogik in BoardViewPage kommen
+      // oder du übergibst nur die geänderten Felder.
+      // Für den Anfang ist das okay:
+      title: editedTitle, 
+      description: editedDescription 
+    }); 
+    // onClose(); // Das Schließen sollte die Elternkomponente (BoardViewPage) nach erfolgreichem Speichern übernehmen
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={(openState) => {
+        if (!openState) { // Wenn der Dialog versucht sich zu schließen (ESC, Klick außerhalb)
+            onClose();
+        }
+    }}>
       <DialogContent className="bg-slate-850 border-slate-700 text-slate-100 p-0 w-[95vw] max-w-4xl md:max-w-5xl lg:max-w-6xl h-[90vh] flex flex-col shadow-2xl rounded-lg">
         <DialogHeader className="p-6 border-b border-slate-700 flex-shrink-0">
           <div className="flex justify-between items-center">
@@ -120,7 +135,7 @@ const ItemEditorModal = ({ isOpen, onClose, item, onSave }) => {
           <Button variant="outline" onClick={onClose} className="text-slate-300 border-slate-600 hover:bg-slate-700">
             Abbrechen
           </Button>
-          <Button onClick={handleSave} className="bg-purple-600 hover:bg-purple-700">
+          <Button onClick={handleSaveChanges} className="bg-purple-600 hover:bg-purple-700">
             <Save size={16} className="mr-2" />
             Speichern
           </Button>

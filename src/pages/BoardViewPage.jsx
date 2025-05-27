@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/context/AuthContext';
@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import ItemCard from '@/components/Items/ItemCard';
+import ItemEditorModal from '@/components/Items/ItemEditorModal'; // Importiere den Modal
+import EpicLane from '@/components/Epics/EpicLane'; // Neue Komponente importieren
 
 const itemTypeOptions = [
   { value: 'epic', label: 'Epic' },
@@ -25,6 +27,13 @@ const AddItemForm = ({ boardId, columnId, onAddItem, onCancel }) => {
   const { toast } = useToast();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+
+  const itemTypeOptions = [ // Definiere dies hier, wenn es nur in AddItemForm verwendet wird
+    { value: 'epic', label: 'Epic' },
+    { value: 'story', label: 'Story' },
+    { value: 'task', label: 'Task' },
+  ];
+
   const [itemType, setItemType] = useState(itemTypeOptions.find(opt => opt.value === 'task').value);
   const [parentItemId, setParentItemId] = useState(null);
   const [availableParents, setAvailableParents] = useState([]);
@@ -223,9 +232,10 @@ const AddItemForm = ({ boardId, columnId, onAddItem, onCancel }) => {
 };
 
 
-const ColumnDisplay = ({ column, boardId, items, setItems }) => {
+const ColumnDisplay = ({ column, boardId, items, setItems, onOpenItemEditor  }) => {
   const [isAddItemModalOpen, setIsAddItemModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false); // Ist der Dialog offen? <-- HIER HINZUGEFÜGT
   const { toast } = useToast();
 
   const handleAddItem = (newItem) => {
@@ -239,26 +249,66 @@ const ColumnDisplay = ({ column, boardId, items, setItems }) => {
     });
   };
   
-  const handleEditItem = (itemToEdit) => {
-    toast({ title: "Bearbeiten", description: `Item "${itemToEdit.title}" bearbeiten (noch nicht implementiert).`});
+  // Diese Funktion wird aufgerufen, wenn auf das Edit-Icon in ItemCard geklickt wird.
+  // Sie ruft die von BoardViewPage übergebene Funktion onOpenItemEditor auf.
+  const handleEditItemClick = (itemToEdit) => {
+    console.log('[ColumnDisplay] handleEditItemClick für Item:', itemToEdit);
+    if (typeof onOpenItemEditor === 'function') {
+      onOpenItemEditor(itemToEdit); // Rufe die Funktion der Elternkomponente auf
+    } else {
+      console.error('[ColumnDisplay] onOpenItemEditor ist keine Funktion. Prop erhalten:', onOpenItemEditor);
+      toast({ title: "Fehler", description: "Bearbeitungsfunktion nicht verfügbar.", variant: "destructive"});
+    }
   };
 
-  const confirmDeleteItem = async () => {
-    if (!itemToDelete) return;
+  // In ColumnDisplay
+// Wird von ItemCard aufgerufen, wenn das Löschen-Icon geklickt wird
+  const handleDeleteTrigger = (item) => {
+    console.log('[ColumnDisplay] handleDeleteTrigger für Item:', item);
+    setItemToDelete(item);        // Speichere, welches Item gelöscht werden soll
+    setIsDeleteDialogOpen(true);   // Öffne den Dialog
+  };
+
+  // Wird aufgerufen, wenn der "Abbrechen"-Button im Dialog geklickt wird
+  // oder wenn der Dialog anderweitig geschlossen wird (z.B. ESC) -> via onOpenChange des AlertDialog
+  const handleCloseDeleteDialog = () => {
+    console.log('[ColumnDisplay] handleCloseDeleteDialog (oder Dialog schließt sich anderweitig)');
+    setIsDeleteDialogOpen(false); // Schließe den Dialog
+    // itemToDelete wird in confirmItemDeletion oder hier zurückgesetzt, je nach Präferenz
+    // oder wenn onOpenChange(false) getriggert wird.
+  };
+
+  const confirmItemDeletion = async () => {
+    if (!itemToDelete) {
+      console.warn('[ColumnDisplay] confirmItemDeletion ohne itemToDelete aufgerufen.');
+      setIsDeleteDialogOpen(false); // Sicherheitshalber Dialog schließen
+      return;
+    }
+    console.log('[ColumnDisplay] confirmItemDeletion für Item:', itemToDelete);
     try {
       const { error } = await supabase.from('items').delete().eq('id', itemToDelete.id);
       if (error) throw error;
       
-      setItems(prevItems => ({
-        ...prevItems,
-        [column.id]: (prevItems[column.id] || []).filter(item => item.id !== itemToDelete.id)
-      }));
+      setItems(prevItems => {
+        const updatedColumnItems = (prevItems[column.id] || []).filter(i => i.id !== itemToDelete.id);
+        return {
+          ...prevItems,
+          [column.id]: updatedColumnItems
+        };
+      });
       toast({ title: "Item gelöscht", description: `Das Item "${itemToDelete.title}" wurde erfolgreich entfernt.`});
     } catch (error) {
        toast({ title: "Fehler beim Löschen", description: error.message, variant: "destructive"});
+       console.error("[ColumnDisplay] Fehler in confirmItemDeletion:", error);
     } finally {
-      setItemToDelete(null);
+      setIsDeleteDialogOpen(false); // Schließe den Dialog
+      setItemToDelete(null);       // Setze das zu löschende Item zurück
     }
+  };
+
+    // Lokaler Handler für das Hinzufügen eines Items in dieser Spalte
+  const handleLocalAddItem = (newItem) => {
+    onAddItem(newItem); // Ruft die Prop-Funktion von BoardViewPage auf
   };
 
   return (
@@ -296,24 +346,15 @@ const ColumnDisplay = ({ column, boardId, items, setItems }) => {
               <p className="text-sm">Keine Aufgaben in dieser Spalte.</p>
             </motion.div>
           )}
-          {(items[column.id] || []).map(item => (
-            <AlertDialog key={item.id} onOpenChange={(open) => { if (!open) setItemToDelete(null); }}>
-              <ItemCard item={item} onEdit={handleEditItem} onDeleteConfirm={() => setItemToDelete(item)} />
-              {itemToDelete && itemToDelete.id === item.id && (
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Item wirklich löschen?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Möchten Sie das Item &quot;{itemToDelete.title}&quot; wirklich unwiderruflich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel onClick={() => setItemToDelete(null)}>Abbrechen</AlertDialogCancel>
-                    <AlertDialogAction onClick={confirmDeleteItem} variant="destructive">Löschen</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              )}
-            </AlertDialog>
+           {(items[column.id] || []).map(item => (
+            // Key hier auf ItemCard, da es das äußerste Element in der Iteration ist,
+            // das den AlertDialog nicht mehr direkt umschließt.
+            <ItemCard 
+              key={item.id} 
+              item={item} 
+              onEdit={handleEditItemClick} 
+              onDeleteTrigger={handleDeleteTrigger} // Hier die korrigierte Funktion übergeben
+            />
           ))}
         </AnimatePresence>
       </div>
@@ -327,11 +368,37 @@ const ColumnDisplay = ({ column, boardId, items, setItems }) => {
           <AddItemForm
             boardId={boardId}
             columnId={column.id}
-            onAddItem={handleAddItem}
+            onAddItem={handleLocalAddItem}
             onCancel={() => setIsAddItemModalOpen(false)}
           />
         </DialogContent>
       </Dialog>
+       {/* AlertDialog zum Bestätigen des Löschens - wird einmal pro Spalte gerendert */}
+      <AlertDialog 
+        open={isDeleteDialogOpen} 
+        onOpenChange={(open) => { // Diese Funktion wird vom AlertDialog selbst getriggert
+            if (!open) { // Wenn der Dialog sich schließt (ESC, Klick außerhalb)
+                handleCloseDeleteDialog();
+            }
+            // Wenn man den Dialog explizit über setIsDeleteDialogOpen steuert,
+            // kann man setIsDeleteDialogOpen auch direkt hier verwenden:
+            // setIsDeleteDialogOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Item wirklich löschen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Möchten Sie das Item "{itemToDelete?.title}" wirklich unwiderruflich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCloseDeleteDialog}>Abbrechen</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmItemDeletion} variant="destructive">Löschen</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </motion.div>
   );
 };
@@ -341,11 +408,15 @@ const BoardViewPage = () => {
   const { boardId } = useParams();
   const { userId } = useAuth();
   const { toast } = useToast();
+  
   const [board, setBoard] = useState(null);
   const [columns, setColumns] = useState([]);
-  const [itemsByColumn, setItemsByColumn] = useState({});
+  const [allItemsFromDB, setAllItemsFromDB] = useState([]); 
   const [loadingBoard, setLoadingBoard] = useState(true);
   const [loadingColumnsAndItems, setLoadingColumnsAndItems] = useState(true);
+  const [editingItem, setEditingItem] = useState(null); // Welches Item wird bearbeitet?
+  const [isItemEditorOpen, setIsItemEditorOpen] = useState(false); // Ist der Editor offen?
+  const [selectedEpicId, setSelectedEpicId] = useState(null); // null = alle anzeigen
 
   const fetchBoardDetails = useCallback(async () => {
     if (!userId || !boardId) {
@@ -386,13 +457,14 @@ const BoardViewPage = () => {
     }
   }, [boardId, userId, toast]);
 
-  const fetchColumnsAndItems = useCallback(async () => {
+  const fetchColumnsAndAllItems = useCallback(async () => {
     if (!boardId || !userId) {
       setLoadingColumnsAndItems(false);
       return;
     }
     setLoadingColumnsAndItems(true);
     try {
+      // Spalten laden
       const { data: columnsData, error: columnsError } = await supabase
         .from('columns')
         .select('*')
@@ -402,25 +474,15 @@ const BoardViewPage = () => {
       if (columnsError) throw columnsError;
       setColumns(columnsData || []);
 
-      if (columnsData && columnsData.length > 0) {
-        const { data: itemsData, error: itemsError } = await supabase
-          .from('items')
-          .select('*')
-          .eq('board_id', boardId)
-          .eq('user_id', userId) 
-          .order('order_index', { ascending: true });
-        
-        if (itemsError) throw itemsError;
-
-        const groupedItems = (itemsData || []).reduce((acc, item) => {
-          const columnItems = acc[item.column_id] || [];
-          acc[item.column_id] = [...columnItems, item].sort((a,b) => a.order_index - b.order_index);
-          return acc;
-        }, {});
-        setItemsByColumn(groupedItems);
-      } else {
-        setItemsByColumn({});
-      }
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('items')
+        .select('*') // Alles auswählen, um Parent-Beziehungen auflösen zu können
+        .eq('board_id', boardId)
+        .eq('user_id', userId)
+        .order('order_index', { ascending: true }); // order_index für initiale Sortierung
+      
+      if (itemsError) throw itemsError;
+      setAllItemsFromDB(itemsData || []);
 
     } catch (error) {
       toast({
@@ -428,6 +490,7 @@ const BoardViewPage = () => {
         description: error.message,
         variant: 'destructive',
       });
+      setAllItemsFromDB([]); // Sicherstellen, dass es ein Array ist
     } finally {
       setLoadingColumnsAndItems(false);
     }
@@ -435,11 +498,104 @@ const BoardViewPage = () => {
   
   useEffect(() => {
     fetchBoardDetails();
-    fetchColumnsAndItems();
-  }, [fetchBoardDetails, fetchColumnsAndItems]);
+    fetchColumnsAndAllItems();
+  }, [fetchBoardDetails, fetchColumnsAndAllItems]);
+
+    // NEUE FUNKTIONEN für den Item Editor
+  const handleOpenItemEditor = (item) => {
+    console.log('[BoardViewPage] handleOpenItemEditor für Item:', item);
+    setEditingItem(item);
+    setIsItemEditorOpen(true);
+  };
+
+  const handleCloseItemEditor = () => {
+    console.log('[BoardViewPage] handleCloseItemEditor');
+    setIsItemEditorOpen(false);
+    setEditingItem(null); // Wichtig: Bearbeitetes Item zurücksetzen
+  };
+
+  const handleSaveItem = async (updatedItemData) => {
+    if (!editingItem) return;
+    console.log('[BoardViewPage] handleSaveItem für Item ID:', editingItem.id, 'Neue Daten:', updatedItemData);
+
+    try {
+      const { data: savedItem, error } = await supabase
+        .from('items')
+        .update({ 
+            title: updatedItemData.title, 
+            description: updatedItemData.description 
+            // Später: weitere Felder wie item_type, parent_item_id, etc.
+        })
+        .eq('id', editingItem.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // UI aktualisieren
+      setAllItemsFromDB(prevItems => 
+        prevItems.map(item => item.id === savedItem.id ? savedItem : item)
+      );
+
+      toast({ title: 'Item erfolgreich aktualisiert', description: `"${savedItem.title}" wurde gespeichert.` });
+      handleCloseItemEditor(); // Modal schließen
+    } catch (error) {
+      toast({
+        title: 'Fehler beim Speichern des Items',
+        description: error.message,
+        variant: 'destructive',
+      });
+      console.error('[BoardViewPage] Fehler in handleSaveItem:', error);
+    }
+  };
+
+   const handleAddItemToState = (newItem) => { // Wird vom AddItemForm aufgerufen
+    setAllItemsFromDB(prevItems => [...prevItems, newItem].sort((a,b) => a.order_index - b.order_index));
+  };
+
+   const handleDeleteItemFromState = (deletedItemId) => { // Wird von ColumnDisplay nach erfolgreichem DB-Löschen aufgerufen
+    setAllItemsFromDB(prevItems => prevItems.filter(item => item.id !== deletedItemId));
+  };
+
+  // NEUE FUNKTION für Epic-Filter-Änderung
+  const handleEpicFilterChange = (epicId) => {
+    setSelectedEpicId(epicId);
+  };
+
+  // useMemo, um die gefilterten Items für die Spalten zu berechnen
+  const itemsByColumn = useMemo(() => {
+    let itemsToDisplay = allItemsFromDB.filter(item => item.item_type === 'story' || item.item_type === 'task'); // Nur Stories und Tasks für Spalten
+
+    if (selectedEpicId) {
+      // Finde alle direkten Kinder (Stories) des ausgewählten Epics
+      const directChildrenStories = allItemsFromDB.filter(
+        item => item.item_type === 'story' && item.parent_item_id === selectedEpicId
+      );
+      const directChildrenStoryIds = directChildrenStories.map(story => story.id);
+
+      // Finde alle Enkel (Tasks), deren Parent eine der direkten Kinder-Stories ist
+      const grandChildrenTasks = allItemsFromDB.filter(
+        item => item.item_type === 'task' && directChildrenStoryIds.includes(item.parent_item_id)
+      );
+      
+      itemsToDisplay = [...directChildrenStories, ...grandChildrenTasks];
+    }
+    // Wenn kein Epic ausgewählt ist (selectedEpicId = null), zeige alle Stories und Tasks an,
+    // die entweder kein Parent-Epic haben oder deren Parent-Epic nicht in der EpicLane ist
+    // (oder einfach alle, je nach gewünschtem Verhalten für "Alle anzeigen").
+    // Fürs Erste: Wenn kein Epic ausgewählt, zeige alle Stories/Tasks.
+
+    // Gruppiere die zu anzeigenden Items nach column_id
+    return itemsToDisplay.reduce((acc, item) => {
+      const columnItems = acc[item.column_id] || [];
+      acc[item.column_id] = [...columnItems, item].sort((a, b) => a.order_index - b.order_index);
+      return acc;
+    }, {});
+  }, [allItemsFromDB, selectedEpicId]);
 
 
-  if (loadingBoard) {
+
+  if (loadingBoard || loadingColumnsAndItems) {
     return (
       <div className="flex justify-center items-center h-full">
         <Loader2 className="h-12 w-12 animate-spin text-purple-400" />
@@ -475,7 +631,7 @@ const BoardViewPage = () => {
       transition={{ duration: 0.3 }}
       className="p-4 md:p-6 h-full flex flex-col"
     >
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 pb-4 border-b border-slate-700">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 pb-4 border-b border-slate-700">
         <div>
           <h1 className="text-3xl md:text-4xl font-bold text-gradient-purple-pink mb-1">
             {board.name}
@@ -486,25 +642,39 @@ const BoardViewPage = () => {
           <PlusCircle className="mr-2 h-5 w-5" /> Neue Spalte
         </Button>
       </div>
-      
-      {loadingColumnsAndItems ? (
-        <div className="flex justify-center items-center flex-grow">
-          <Loader2 className="h-10 w-10 animate-spin text-purple-300" />
+
+            {/* Epic Lane und Filter-Platzhalter */}
+      <div className="flex items-start mb-6"> {/* Flex-Container für EpicLane und Filter-Platzhalter */}
+        <div className="flex-grow"> {/* Nimmt den meisten Platz */}
+          <EpicLane 
+            boardId={boardId}
+            onEpicSelect={handleEpicFilterChange}
+            activeEpicId={selectedEpicId}
+          />
         </div>
-      ) : (
-        <div className="flex-grow overflow-x-auto pb-4">
-          <div className="flex space-x-4 h-full">
-            {columns.length > 0 ? (
-              columns.map((col) => (
-                <ColumnDisplay 
-                  key={col.id} 
-                  column={col} 
-                  boardId={boardId}
-                  items={itemsByColumn}
-                  setItems={setItemsByColumn}
-                />
-              ))
-            ) : (
+        <div className="ml-4 p-4 bg-slate-700/50 rounded-lg shadow-lg flex-shrink-0 w-64 h-full"> {/* Platzhalter rechts, feste Breite */}
+            <h3 className="text-lg font-semibold text-pink-300 mb-2">Filter</h3>
+            <p className="text-slate-400 text-sm">Zukünftige erweiterte Filterfunktionen hier (z.B. nach Tags, Usern, Fälligkeit).</p>
+        </div>
+      </div>
+      
+      <div className="flex-grow overflow-x-auto pb-4">
+        <div className="flex space-x-4 h-full">
+          {columns.length > 0 ? (
+            columns.map((col) => (
+              <ColumnDisplay 
+                key={col.id} 
+                column={col} 
+                boardId={boardId}
+                items={itemsByColumn} // Übergibt die gefilterten und gruppierten Items
+                // setItems={setItemsByColumn} // setItemsByColumn wird jetzt durch allItemsFromDB und useMemo gesteuert
+                                            // Stattdessen Funktionen übergeben, um allItemsFromDB zu modifizieren
+                onAddItem={handleAddItemToState}
+                onDeleteItem={handleDeleteItemFromState} // Diese Funktion muss in ColumnDisplay implementiert werden, um handleDeleteItemFromState aufzurufen
+                onOpenItemEditor={handleOpenItemEditor}
+              />
+            ))
+          ) : (
               <div className="flex-grow flex flex-col justify-center items-center text-slate-500 card-glass p-8">
                 <img  alt="Leeres Whiteboard mit einem einzelnen Notizzettel" src="https://images.unsplash.com/photo-1677506048148-0c914dd8197b" />
                 <p className="mt-4 text-lg">Dieses Board hat noch keine Spalten.</p>
@@ -526,7 +696,13 @@ const BoardViewPage = () => {
               )}
           </div>
         </div>
-      )}
+      {/* Item Editor Modal hier einbinden */}
+      <ItemEditorModal
+        isOpen={isItemEditorOpen}
+        onClose={handleCloseItemEditor}
+        item={editingItem}
+        onSave={handleSaveItem}
+      />
     </motion.div>
   );
 };

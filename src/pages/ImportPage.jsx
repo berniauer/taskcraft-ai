@@ -38,6 +38,70 @@ const expectedJsonStructure = `{
   ]
 }`;
 
+// Rekursive Hilfsfunktion für den Import (außerhalb der Komponente, da sie keinen Hook-Zugriff benötigt, außer supabase)
+const importItemRecursive = async (itemData, boardId, columnId, currentUserId, parentId = null, importErrors, incrementSuccessCount, incrementErrorCount) => {
+  try {
+    const { data: maxOrderData, error: maxOrderError } = await supabase
+      .from('items')
+      .select('order_index')
+      .eq('board_id', boardId)
+      .eq('column_id', columnId)
+      .order('order_index', { ascending: false })
+      .limit(1);
+
+    if (maxOrderError) throw maxOrderError;
+    const newOrderIndex = maxOrderData && maxOrderData.length > 0 ? maxOrderData[0].order_index + 1 : 0;
+
+    const itemType = itemData.type?.toLowerCase();
+    if (!['epic', 'story', 'task'].includes(itemType)) {
+      console.warn(`Ungültiger Item-Typ "${itemData.type}" für Item "${itemData.title}". Übersprungen.`);
+      importErrors.push(`Ungültiger Typ für Item "${itemData.title}"`);
+      incrementErrorCount();
+      return;
+    }
+
+    const newItemPayload = {
+      board_id: boardId,
+      column_id: columnId,
+      user_id: currentUserId,
+      title: itemData.title,
+      description: itemData.description || null,
+      item_type: itemType,
+      parent_item_id: parentId,
+      order_index: newOrderIndex,
+      tags_text_array: itemData.tags && Array.isArray(itemData.tags) ? itemData.tags : null,
+    };
+
+    const { data: insertedItem, error: insertError } = await supabase
+      .from('items')
+      .insert(newItemPayload)
+      .select('id')
+      .single();
+
+    if (insertError) throw insertError; // Wichtig: Fehler hier werfen, damit er im äußeren try/catch gefangen wird
+    incrementSuccessCount();
+    console.log(`Item "${newItemPayload.title}" importiert mit ID: ${insertedItem.id}`);
+
+    let childrenToImport = [];
+    if (itemType === 'epic' && itemData.stories && Array.isArray(itemData.stories)) {
+      childrenToImport = itemData.stories;
+    } else if (itemType === 'story' && itemData.tasks && Array.isArray(itemData.tasks)) {
+      childrenToImport = itemData.tasks;
+    }
+
+    for (const childItemData of childrenToImport) {
+      await importItemRecursive(childItemData, boardId, columnId, currentUserId, insertedItem.id, importErrors, incrementSuccessCount, incrementErrorCount);
+    }
+
+  } catch (error) {
+    console.error(`Fehler beim Importieren von Item "${itemData.title || 'Unbenanntes Item'}":`, error);
+    importErrors.push(`Fehler bei "${(itemData.title || 'Unbenanntes Item').substring(0,20)}...": ${error.message.substring(0,30)}...`);
+    incrementErrorCount();
+    // Optional: Den Fehler hier weiterwerfen, wenn ein einzelner Fehler den gesamten Import stoppen soll
+    // throw error; 
+  }
+};
+
 const ImportPage = () => {
   const { toast } = useToast();
   const { userId } = useAuth();
@@ -49,6 +113,7 @@ const ImportPage = () => {
   const [boards, setBoards] = useState([]);
   const [selectedBoardId, setSelectedBoardId] = useState('');
   const [loadingBoards, setLoadingBoards] = useState(false);
+  const [isImporting, setIsImporting] = useState(false); // NEUER STATE
 
   useEffect(() => {
     const fetchBoards = async () => {
@@ -134,17 +199,87 @@ const ImportPage = () => {
       });
   };
 
-  const handleImportStart = () => {
-    if (!parsedJsonData || !selectedBoardId) {
-      toast({ title: 'Fehlende Informationen', description: 'Bitte stellen Sie sicher, dass eine Datei geparst und ein Ziel-Board ausgewählt wurde.', variant: 'destructive'});
+// Import-Handler Funktion
+const handleImportStart = async () => {
+    if (!parsedJsonData || !selectedBoardId || !userId || parsingStatus !== 'success') {
+        toast({
+            title: 'Fehlende oder ungültige Informationen',
+            description: 'Bitte stellen Sie sicher, dass eine gültige Datei geparst und ein Ziel-Board ausgewählt wurde.',
+            variant: 'destructive',
+        });
+        return;
+    }
+
+    if (!parsedJsonData.items || !Array.isArray(parsedJsonData.items) || parsedJsonData.items.length === 0) {
+      toast({
+        title: 'Keine Items gefunden',
+        description: 'Die JSON-Datei enthält keine Items im erwarteten Format oder das "items"-Array ist leer.',
+        variant: 'warning',
+      });
       return;
     }
-    console.log('Import initiiert für Board-ID:', selectedBoardId, 'mit folgenden geparsten Daten:', parsedJsonData);
-    toast({ title: 'Import gestartet (Platzhalter)', description: 'Die Daten werden in der Konsole geloggt.'});
-    // Hier kommt später die Supabase Speicherlogik
+setIsImporting(true);
+    let successCount = 0;
+    let errorCount = 0;
+    const importErrors = [];
+
+    // Hilfsfunktionen, um die Zähler zu inkrementieren
+    const incrementSuccess = () => successCount++;
+    const incrementError = () => errorCount++;
+
+    try {
+      const { data: boardColumns, error: columnsError } = await supabase
+        .from('columns')
+        .select('id, name')
+        .eq('board_id', selectedBoardId)
+        .order('order_index', { ascending: true })
+        .limit(1);
+
+      if (columnsError) throw columnsError;
+      if (!boardColumns || boardColumns.length === 0) {
+        toast({
+          title: 'Keine Spalten im Ziel-Board',
+          description: 'Das ausgewählte Board hat keine Spalten. Import nicht möglich.',
+          variant: 'destructive',
+        });
+        setIsImporting(false);
+        return;
+      }
+      const targetColumnId = boardColumns[0].id;
+      console.log(`Importiere alle Items in Spalte ID: ${targetColumnId} (Name: ${boardColumns[0].name})`);
+
+      for (const topLevelItem of parsedJsonData.items) {
+        // Wir warten hier auf jedes Top-Level Item, um Fehler besser zu isolieren
+        // und um sicherzustellen, dass parent IDs für die nächste Ebene verfügbar sind.
+        await importItemRecursive(topLevelItem, selectedBoardId, targetColumnId, userId, null, importErrors, incrementSuccess, incrementError);
+      }
+
+      if (errorCount > 0) {
+        toast({
+          title: 'Import abgeschlossen mit Fehlern',
+          description: `${successCount} Items importiert, ${errorCount} Fehler. Details: ${importErrors.slice(0, 3).join('; ')}`,
+          variant: 'warning',
+          duration: 9000,
+        });
+      } else {
+        toast({
+          title: 'Import erfolgreich!',
+          description: `${successCount} Items wurden in das Board "${boards.find(b => b.id === selectedBoardId)?.name}" importiert.`,
+        });
+      }
+    } catch (error) {
+      console.error('Schwerwiegender Fehler während des Imports:', error);
+      toast({
+        title: 'Import fehlgeschlagen',
+        description: error.message || 'Ein unbekannter Fehler ist aufgetreten.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsImporting(false);
+    }
   };
 
-  const isImportDisabled = !parsedJsonData || !selectedBoardId || parsingStatus !== 'success';
+  const isImportDisabled = !parsedJsonData || !selectedBoardId || parsingStatus !== 'success' || isImporting;
 
   return (
     <motion.div
@@ -249,7 +384,12 @@ const ImportPage = () => {
           onClick={handleImportStart}
           disabled={isImportDisabled}
         >
-          <UploadCloud size={20} className="mr-2" /> Import starten
+          {isImporting ? (
+            <Loader2 size={20} className="mr-2 animate-spin" />
+          ) : (
+            <UploadCloud size={20} className="mr-2" />
+          )}
+          {isImporting ? 'Importiere...' : 'Import starten'} 
         </Button>
       </div>
     </motion.div>
