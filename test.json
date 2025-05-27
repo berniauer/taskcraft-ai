@@ -1,0 +1,107 @@
+{
+  "boardName": "Mein neues KI-Projekt",
+  "items": [
+    {
+      "type": "epic",
+      "title": "Entwicklung einer persönlichen Produktivitäts-App",
+      "description": "Eine App entwickeln, die Nutzern hilft, ihre Aufgaben, Projekte und Ziele effizient zu managen und ihre Produktivität zu steigern.",
+      "tags": ["App-Entwicklung", "Produktivität", "MVP"],
+      "stories": [
+        {
+          "type": "story",
+          "title": "Benutzerauthentifizierung implementieren",
+          "description": "Nutzer sollen sich sicher registrieren, anmelden und abmelden können.",
+          "tags": ["Sicherheit", "Core-Feature"],
+          "tasks": [
+            {
+              "type": "task",
+              "title": "Registrierungsformular erstellen",
+              "description": "UI für das Registrierungsformular mit E-Mail und Passwort entwerfen und umsetzen.",
+              "tags": ["Frontend", "UI"]
+            },
+            {
+              "type": "task",
+              "title": "Login-Funktionalität mit Supabase Auth",
+              "description": "Backend-Logik für den Login über Supabase Auth implementieren.",
+              "tags": ["Backend", "Supabase"]
+            },
+            {
+              "type": "task",
+              "title": "Passwort-vergessen-Funktion konzipieren",
+              "description": "Ablauf für das Zurücksetzen des Passworts planen.",
+              "tags": ["Konzept", "Sicherheit"]
+            }
+          ]
+        },
+        {
+          "type": "story",
+          "title": "Board-Ansicht erstellen",
+          "description": "Nutzer sollen ihre Aufgaben in einer Kanban-Board-Ansicht mit Spalten verwalten können.",
+          "tags": ["Core-Feature", "UI/UX"],
+          "tasks": [
+            {
+              "type": "task",
+              "title": "Grundlegende Spaltenstruktur anzeigen",
+              "description": "Statische Spalten (To Do, In Arbeit, Erledigt) auf der Board-Seite darstellen.",
+              "tags": ["Frontend"]
+            },
+            {
+              "type": "task",
+              "title": "Aufgabenkarten (ItemCards) designen",
+              "description": "Das Aussehen und die Informationen auf den Aufgabenkarten definieren.",
+              "tags": ["UI-Design"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "epic",
+      "title": "Marketing und Launch der App",
+      "description": "Strategien und Aktivitäten planen, um die App bekannt zu machen und erfolgreich zu launchen.",
+      "tags": ["Marketing", "Launch-Planung"],
+      "stories": [
+        {
+          "type": "story",
+          "title": "Landingpage erstellen",
+          "description": "Eine ansprechende Landingpage entwickeln, um Interesse zu wecken und Voranmeldungen zu sammeln.",
+          "tags": ["Web-Entwicklung", "Marketing-Material"],
+          "tasks": [
+            {
+              "type": "task",
+              "title": "Texte für Landingpage verfassen",
+              "description": "Überzeugende und informative Inhalte für die Landingpage schreiben.",
+              "tags": ["Copywriting"]
+            },
+            {
+              "type": "task",
+              "title": "Design-Mockup für Landingpage erstellen",
+              "description": "Visuelles Konzept der Landingpage entwerfen.",
+              "tags": ["UI-Design"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "story",
+      "title": "Ideensammlung für Blog-Artikel",
+      "description": "Themen und Stichpunkte für zukünftige Blog-Artikel zum Thema Produktivität sammeln.",
+      "tags": ["Content-Planung", "Blog"],
+      "tasks": [
+        {
+          "type": "task",
+          "title": "Brainstorming-Session für Blog-Themen",
+          "description": "Mindestens 10 Ideen für Blog-Artikel generieren.",
+          "tags": ["Kreativität"]
+        }
+      ]
+    },
+    {
+      "type": "task",
+      "title": "Wichtige private Erledigung",
+      "description": "Nicht vergessen: Geschenk für Annas Geburtstag kaufen.",
+      "tags": ["Privat", "Wichtig"]
+    }
+  ]
+}
